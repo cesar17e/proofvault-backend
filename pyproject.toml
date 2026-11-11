@@ -16,6 +16,7 @@ dependencies = [
     "psycopg[binary]>=3.2,<4.0",
     "sqlalchemy>=2.0.40,<2.1",
     "pgvector>=0.4,<0.5",
+    "alembic>=1.13,<2.0",
 ]
 
 [tool.setuptools.packages.find]
