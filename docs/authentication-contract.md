@@ -46,8 +46,8 @@ the token signature, issuer, audience, and lifetime.
 The verifier is independent of FastAPI and raises application-domain errors.
 Invalid, expired, forged, or untrusted-key tokens raise
 `InvalidAccessTokenError`. A connection failure or malformed response from the
-configured JWKS endpoint raises `JWKSUnavailableError`. Milestone 2.3 will map
-these errors to HTTP responses.
+configured JWKS endpoint raises `JWKSUnavailableError`. The `get_current_user`
+dependency maps these errors to controlled HTTP responses.
 
 The JWKS client caches the key set for up to ten minutes, uses a five-second
 network timeout, and retains PyJWT's cooldown for forced refreshes after an
@@ -74,9 +74,36 @@ The frontend may use the public Supabase project URL and publishable key. It
 must never receive the database connection string, a service-role key, or any
 other backend credential.
 
+## FastAPI authentication boundary
+
+Protected routes receive a frozen `CurrentUser` through the reusable
+`get_current_user` dependency. The principal contains only the verified user
+UUID, email, role, session UUID, and authentication assurance level. Routes do
+not receive or decode raw access tokens.
+
+Missing, malformed, expired, or otherwise invalid bearer credentials produce a
+generic `401 Unauthorized` response with `WWW-Authenticate: Bearer`. A
+temporary JWKS availability failure produces `503 Service Unavailable` so it is
+not misreported as a user authentication failure. The verifier and its JWKS
+cache are created once per application process.
+
+## Protected identity endpoint
+
+`GET /api/v1/users/me` is the first protected production endpoint. It returns
+the verified user's UUID and email from `CurrentUser`; it does not query the
+database or expose the access token, session UUID, or complete JWT claims. The
+public `GET /health` liveness endpoint remains outside the versioned protected
+API.
+
 ## Verification status
 
 Automated verification uses locally generated P-256 keys and mocked JWKS
-responses. Testing real Supabase access tokens is intentionally deferred to
-Milestone 2.4, when `/api/v1/users/me` provides the complete authentication
-flow.
+responses. The complete `/api/v1/users/me` HTTP flow is covered with synthetic
+verified identities. Final verification with real Supabase access tokens is a
+manual Milestone 2.4 completion gate.
+
+For that gate, sign in separately as each development user, authorize Swagger
+with the current access token, and call `GET /api/v1/users/me`. Each response
+must contain that user's own UUID and email. Missing, expired, altered, or
+other-project tokens must return `401` without exposing verification details.
+Access tokens must not be committed, saved in documentation, or logged.
