@@ -1,4 +1,5 @@
 from app.auth.claims import SupabaseJWTClaims
+from app.auth.principal import CurrentUser
 from app.auth.verifier import (
     InvalidAccessTokenError,
     JWKSUnavailableError,
@@ -7,6 +8,7 @@ from app.auth.verifier import (
 
 
 __all__ = [
+    "CurrentUser",
     "InvalidAccessTokenError",
     "JWKSUnavailableError",
     "SupabaseJWTClaims",

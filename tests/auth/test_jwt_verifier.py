@@ -1,5 +1,6 @@
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
+import json
 from typing import Any
 from uuid import uuid4
 
@@ -9,6 +10,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from jwt import PyJWKClient
 from jwt.algorithms import ECAlgorithm
 from jwt.exceptions import PyJWKClientConnectionError
+from jwt.utils import base64url_decode, base64url_encode
 
 from app.auth import (
     InvalidAccessTokenError,
@@ -50,11 +52,15 @@ def private_key():
 
 @pytest.fixture()
 def jwks(private_key) -> dict[str, Any]:
+    return make_jwks(private_key, KEY_ID)
+
+
+def make_jwks(private_key, key_id: str) -> dict[str, Any]:
     public_jwk = ECAlgorithm.to_jwk(private_key.public_key(), as_dict=True)
     public_jwk.update(
         {
             "alg": "ES256",
-            "kid": KEY_ID,
+            "kid": key_id,
             "use": "sig",
         }
     )
@@ -133,6 +139,33 @@ def test_reuses_cached_mocked_jwks(private_key, jwks, valid_payload) -> None:
     verifier.verify(token)
 
     assert client.fetch_count == 1
+
+
+def test_refreshes_cached_jwks_for_rotated_key(valid_payload) -> None:
+    original_key = ec.generate_private_key(ec.SECP256R1())
+    rotated_key = ec.generate_private_key(ec.SECP256R1())
+    client = MockJWKSClient(make_jwks(original_key, "original-key"))
+    verifier = make_verifier(client)
+
+    verifier.verify(
+        encode_token(
+            valid_payload,
+            original_key,
+            key_id="original-key",
+        )
+    )
+
+    client.response = make_jwks(rotated_key, "rotated-key")
+    claims = verifier.verify(
+        encode_token(
+            valid_payload,
+            rotated_key,
+            key_id="rotated-key",
+        )
+    )
+
+    assert str(claims.sub) == valid_payload["sub"]
+    assert client.fetch_count == 2
 
 
 @pytest.mark.parametrize(
@@ -216,6 +249,27 @@ def test_rejects_wrong_signature(jwks, valid_payload) -> None:
 
     with pytest.raises(InvalidAccessTokenError):
         verifier.verify(encode_token(valid_payload, untrusted_key))
+
+
+def test_rejects_payload_tampering_impersonation(
+    private_key,
+    jwks,
+    valid_payload,
+) -> None:
+    token = encode_token(valid_payload, private_key)
+    header_segment, payload_segment, signature_segment = token.split(".")
+    payload = json.loads(base64url_decode(payload_segment.encode()))
+    payload["sub"] = str(uuid4())
+    tampered_segment = base64url_encode(
+        json.dumps(payload, separators=(",", ":")).encode()
+    ).decode()
+    tampered_token = ".".join(
+        (header_segment, tampered_segment, signature_segment)
+    )
+    verifier = make_verifier(MockJWKSClient(jwks))
+
+    with pytest.raises(InvalidAccessTokenError):
+        verifier.verify(tampered_token)
 
 
 def test_rejects_wrong_algorithm(valid_payload) -> None:

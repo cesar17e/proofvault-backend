@@ -98,12 +98,12 @@ API.
 ## Verification status
 
 Automated verification uses locally generated P-256 keys and mocked JWKS
-responses. The complete `/api/v1/users/me` HTTP flow is covered with synthetic
-verified identities. Final verification with real Supabase access tokens is a
-manual Milestone 2.4 completion gate.
+responses. It covers signing-key rotation, payload-tampering impersonation,
+claim and lifetime failures, two-user identity isolation, generic API errors,
+and the public health endpoint. No automated authentication test requires a
+real credential or external network request.
 
-For that gate, sign in separately as each development user, authorize Swagger
-with the current access token, and call `GET /api/v1/users/me`. Each response
-must contain that user's own UUID and email. Missing, expired, altered, or
-other-project tokens must return `401` without exposing verification details.
-Access tokens must not be committed, saved in documentation, or logged.
+Manual verification through Swagger was completed with both Supabase
+development users. Each access token returned its own UUID and email through
+`GET /api/v1/users/me`, completing the Milestone 2.4 live-token gate. Access
+tokens must not be committed, saved in documentation, or logged.
