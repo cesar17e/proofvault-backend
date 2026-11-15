@@ -8,7 +8,7 @@
 
 ProofVault is a private, proof-oriented mathematical library. Users save **theorem statements** and **proof-based problem statements**, together with optional proofs, explanations, or worked solutions. Content may contain serious mathematical notation, including matrices, convergence arguments, piecewise functions, logical symbols, and multiline derivations.
 
-ProofVault **stores and retrieves** mathematical content; V1 does not prove the correctness of a statement, solve arbitrary exercises, or perform symbolic mathematics. The database stores the *original text*, not a compiled TeX document.
+ProofVault **stores and retrieves** mathxxwematical content; V1 does not prove the correctness of a statement, solve arbitrary exercises, or perform symbolic mathematics. The database stores the *original text*, not a compiled TeX document.
 
 ## 2. Accepted representation
 
