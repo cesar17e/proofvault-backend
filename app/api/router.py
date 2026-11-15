@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api.routes.courses import router as courses_router
+from app.api.routes.entries import router as entries_router
 from app.api.routes.health import router as health_router
 from app.api.routes.users import router as users_router
 
@@ -10,6 +11,7 @@ api_router.include_router(health_router)
 
 v1_router = APIRouter(prefix="/api/v1")
 v1_router.include_router(courses_router)
+v1_router.include_router(entries_router)
 v1_router.include_router(users_router)
 
 api_router.include_router(v1_router)
