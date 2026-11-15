@@ -24,8 +24,17 @@ SourceReference = Annotated[str, StringConstraints(max_length=2_000)]
 
 
 class EntryKind(StrEnum):
+    """Organizational category; it does not change content requirements."""
+
     THEOREM = "theorem"
+    PROPOSITION = "proposition"
+    LEMMA = "lemma"
+    COROLLARY = "corollary"
+    DEFINITION = "definition"
     PROBLEM = "problem"
+    CONJECTURE = "conjecture"
+    IDENTITY = "identity"
+    OTHER = "other"
 
 
 class EntryIndexStatus(StrEnum):
@@ -73,7 +82,7 @@ class EntryUpdate(BaseModel):
     course_id: UUID | None = None
     title: EntryTitle | None = None
     kind: EntryKind | None = None
-    statement: StatementSource | None = None
+    statement: StatementSource | None = None  #The theorem/question/statement of the entry
     proof: ProofSource | None = None
     topic: EntryTopic | None = None
     source_reference: SourceReference | None = None

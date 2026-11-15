@@ -34,6 +34,27 @@ def test_entry_create_preserves_mathematical_source_exactly() -> None:
     assert payload.kind is EntryKind.THEOREM
 
 
+@pytest.mark.parametrize("kind", list(EntryKind))
+def test_every_entry_kind_is_metadata_with_optional_proof(kind: EntryKind) -> None:
+    payload = EntryCreate(
+        title=f"A {kind.value} entry",
+        kind=kind.value,
+        statement="$x=x$",
+    )
+
+    assert payload.kind is kind
+    assert payload.proof is None
+
+
+def test_unknown_entry_kind_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        EntryCreate(
+            title="An unsupported category",
+            kind="example",
+            statement="$x=x$",
+        )
+
+
 @pytest.mark.parametrize("field", ["title", "statement"])
 def test_required_entry_text_must_not_be_blank(field: str) -> None:
     data = {

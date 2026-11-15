@@ -130,7 +130,7 @@ def test_list_entries_returns_summaries_and_forwards_filters(monkeypatch) -> Non
         id=ENTRY_ID,
         course_id=COURSE_ID,
         title="Convergent sequences are bounded",
-        kind="theorem",
+        kind="definition",
         statement=STATEMENT,
         topic="Sequences",
         index_status="pending",
@@ -152,7 +152,7 @@ def test_list_entries_returns_summaries_and_forwards_filters(monkeypatch) -> Non
     response = client.get(
         "/api/v1/entries",
         params={
-            "kind": "theorem",
+            "kind": "definition",
             "course_id": str(COURSE_ID),
             "topic": "Sequences",
             "limit": 5,
@@ -167,7 +167,7 @@ def test_list_entries_returns_summaries_and_forwards_filters(monkeypatch) -> Non
                 "id": str(ENTRY_ID),
                 "course_id": str(COURSE_ID),
                 "title": "Convergent sequences are bounded",
-                "kind": "theorem",
+                "kind": "definition",
                 "statement": STATEMENT,
                 "topic": "Sequences",
                 "index_status": "pending",
@@ -181,7 +181,7 @@ def test_list_entries_returns_summaries_and_forwards_filters(monkeypatch) -> Non
     assert "proof" not in response.json()["items"][0]
     assert captured == {
         "owner_id": USER_ID,
-        "kind": EntryKind.THEOREM,
+        "kind": EntryKind.DEFINITION,
         "course_id": COURSE_ID,
         "topic": "Sequences",
         "limit": 5,

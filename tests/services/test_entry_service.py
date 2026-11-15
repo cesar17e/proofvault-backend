@@ -40,12 +40,13 @@ def make_summary_row(
     created_at: datetime,
     *,
     has_proof: bool = True,
+    kind: str = "theorem",
 ) -> dict:
     return {
         "id": entry_id,
         "course_id": COURSE_ID,
         "title": f"Entry {entry_id}",
-        "kind": "theorem",
+        "kind": kind,
         "statement": "$x=x$",
         "topic": "Sequences",
         "index_status": "pending",
@@ -117,16 +118,24 @@ def test_create_entry_verifies_course_ownership(monkeypatch) -> None:
 def test_list_entries_is_filtered_owner_scoped_and_uses_limit_plus_one() -> None:
     session = make_session()
     rows = [
-        make_summary_row(ENTRY_ID, CREATED_AT),
-        make_summary_row(SECOND_ENTRY_ID, CREATED_AT - timedelta(minutes=1)),
-        make_summary_row(THIRD_ENTRY_ID, CREATED_AT - timedelta(minutes=2)),
+        make_summary_row(ENTRY_ID, CREATED_AT, kind="lemma"),
+        make_summary_row(
+            SECOND_ENTRY_ID,
+            CREATED_AT - timedelta(minutes=1),
+            kind="lemma",
+        ),
+        make_summary_row(
+            THIRD_ENTRY_ID,
+            CREATED_AT - timedelta(minutes=2),
+            kind="lemma",
+        ),
     ]
     session.execute.return_value.mappings.return_value.all.return_value = rows
 
     page = entry_service.list_entries(
         session,
         owner_id=OWNER_ID,
-        kind=EntryKind.THEOREM,
+        kind=EntryKind.LEMMA,
         course_id=COURSE_ID,
         topic="Sequences",
         limit=2,
@@ -151,7 +160,7 @@ def test_list_entries_is_filtered_owner_scoped_and_uses_limit_plus_one() -> None
     assert "proofvault.entries.id DESC" in sql
     assert OWNER_ID in params
     assert COURSE_ID in params
-    assert "theorem" in params
+    assert "lemma" in params
     assert "Sequences" in params
     assert 3 in params
 

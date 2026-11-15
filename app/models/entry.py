@@ -28,7 +28,10 @@ class Entry(TimestampMixin, Base):
             name="ck_entries_statement_not_blank",
         ),
         CheckConstraint(
-            "kind IN ('theorem', 'problem')",
+            "kind IN ("
+            "'theorem', 'proposition', 'lemma', 'corollary', "
+            "'definition', 'problem', 'conjecture', 'identity', 'other'"
+            ")",
             name="ck_entries_kind",
         ),
         CheckConstraint(
