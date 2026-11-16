@@ -2,7 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import AnyHttpUrl, SecretStr, field_validator
+from pydantic import AnyHttpUrl, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     supabase_jwt_algorithm: Literal["ES256"] = "ES256"
     supabase_jwt_audience: Literal["authenticated"] = "authenticated"
 
+    voyage_api_key: SecretStr
+    voyage_embedding_model: str = "voyage-4"
+    voyage_timeout_seconds: float = Field(default=10.0, gt=0, le=60)
+    voyage_max_retries: int = Field(default=1, ge=0, le=3)
+
     @field_validator("supabase_url")
     @classmethod
     def validate_supabase_url(cls, value: AnyHttpUrl) -> AnyHttpUrl:
@@ -28,6 +33,21 @@ class Settings(BaseSettings):
             raise ValueError("Supabase URL must not contain a path")
 
         return value
+
+    @field_validator("voyage_api_key")
+    @classmethod
+    def validate_voyage_api_key(cls, value: SecretStr) -> SecretStr:
+        if not value.get_secret_value().strip():
+            raise ValueError("Voyage API key must not be blank")
+        return value
+
+    @field_validator("voyage_embedding_model")
+    @classmethod
+    def validate_voyage_embedding_model(cls, value: str) -> str:
+        model = value.strip()
+        if not model:
+            raise ValueError("Voyage embedding model must not be blank")
+        return model
 
     @property
     def supabase_jwt_issuer(self) -> str:

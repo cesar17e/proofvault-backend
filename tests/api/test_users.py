@@ -68,6 +68,7 @@ def make_test_client(verifier: StubVerifier) -> TestClient:
         _env_file=None,
         database_url="postgresql+psycopg://user:password@localhost/proofvault",
         supabase_url="https://project-ref.supabase.co",
+        voyage_api_key="test-voyage-api-key",
     )
     return TestClient(application)
 

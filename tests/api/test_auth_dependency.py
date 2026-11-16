@@ -172,6 +172,7 @@ def test_process_reuses_cached_verifier(monkeypatch) -> None:
         _env_file=None,
         database_url="postgresql+psycopg://user:password@localhost/proofvault",
         supabase_url="https://project-ref.supabase.co",
+        voyage_api_key="test-voyage-api-key",
     )
     auth_dependencies.get_jwt_verifier.cache_clear()
     monkeypatch.setattr(auth_dependencies, "get_settings", lambda: settings)
