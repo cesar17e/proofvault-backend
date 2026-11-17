@@ -38,6 +38,7 @@ class IndexingOutcome(StrEnum):
     INDEXED = "indexed"
     SKIPPED = "skipped"
     FAILED = "failed"
+    STALE = "stale"
 
 
 @dataclass(frozen=True)
@@ -51,6 +52,12 @@ class IndexingResult:
     duration_ms: float
     total_tokens: int | None = None
     failure_type: str | None = None
+
+
+@dataclass(frozen=True)
+class _FinalizationResult:
+    applied: bool
+    index_status: EntryIndexStatus
 
 
 def statement_content_hash(statement: str) -> str:
@@ -116,15 +123,20 @@ def index_entry(
         vector = _single_embedding(batch)
     except EmbeddingProviderError as error:
         duration_ms = _elapsed_ms(started_at)
-        _mark_failed(
+        finalization = _mark_failed(
             session,
             owner_id=owner_id,
             entry_id=entry_id,
+            expected_content_hash=content_hash,
         )
         result = IndexingResult(
             entry_id=entry_id,
-            outcome=IndexingOutcome.FAILED,
-            index_status=EntryIndexStatus.FAILED,
+            outcome=(
+                IndexingOutcome.FAILED
+                if finalization.applied
+                else IndexingOutcome.STALE
+            ),
+            index_status=finalization.index_status,
             content_hash=content_hash,
             provider=provider.name,
             model=provider.model,
@@ -135,7 +147,7 @@ def index_entry(
         return result
 
     duration_ms = _elapsed_ms(started_at)
-    _store_embedding(
+    finalization = _store_embedding(
         session,
         owner_id=owner_id,
         entry_id=entry_id,
@@ -145,8 +157,12 @@ def index_entry(
     )
     result = IndexingResult(
         entry_id=entry_id,
-        outcome=IndexingOutcome.INDEXED,
-        index_status=EntryIndexStatus.READY,
+        outcome=(
+            IndexingOutcome.INDEXED
+            if finalization.applied
+            else IndexingOutcome.STALE
+        ),
+        index_status=finalization.index_status,
         content_hash=content_hash,
         provider=provider.name,
         model=provider.model,
@@ -188,6 +204,8 @@ def _load_entry_and_embedding(
             Entry.id == entry_id,
             Entry.owner_id == owner_id,
         )
+        .with_for_update(of=Entry)
+        .execution_options(populate_existing=True)
     )
     row = session.execute(statement).one_or_none()
     if row is None:
@@ -229,14 +247,26 @@ def _mark_failed(
     *,
     owner_id: UUID,
     entry_id: UUID,
-) -> None:
+    expected_content_hash: str,
+) -> _FinalizationResult:
     entry = _load_entry_for_update(
         session,
         owner_id=owner_id,
         entry_id=entry_id,
     )
+    if statement_content_hash(entry.statement) != expected_content_hash:
+        _commit(session)
+        return _FinalizationResult(
+            applied=False,
+            index_status=EntryIndexStatus(entry.index_status),
+        )
+
     entry.index_status = EntryIndexStatus.FAILED.value
     _commit(session)
+    return _FinalizationResult(
+        applied=True,
+        index_status=EntryIndexStatus.FAILED,
+    )
 
 
 def _store_embedding(
@@ -247,12 +277,19 @@ def _store_embedding(
     vector: tuple[float, ...],
     provider: EmbeddingProvider,
     content_hash: str,
-) -> None:
+) -> _FinalizationResult:
     entry = _load_entry_for_update(
         session,
         owner_id=owner_id,
         entry_id=entry_id,
     )
+    if statement_content_hash(entry.statement) != content_hash:
+        _commit(session)
+        return _FinalizationResult(
+            applied=False,
+            index_status=EntryIndexStatus(entry.index_status),
+        )
+
     insert_statement = insert(EntryEmbedding).values(
         entry_id=entry_id,
         embedding=list(vector),
@@ -273,6 +310,10 @@ def _store_embedding(
     session.execute(upsert_statement)
     entry.index_status = EntryIndexStatus.READY.value
     _commit(session)
+    return _FinalizationResult(
+        applied=True,
+        index_status=EntryIndexStatus.READY,
+    )
 
 
 def _load_entry_for_update(
@@ -288,6 +329,7 @@ def _load_entry_for_update(
             Entry.owner_id == owner_id,
         )
         .with_for_update()
+        .execution_options(populate_existing=True)
     )
     entry = session.scalar(statement)
     if entry is None:

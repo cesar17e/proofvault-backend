@@ -5,7 +5,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, Response, status
 
-from app.api.dependencies import CurrentUserDependency, DbSessionDependency
+from app.api.dependencies import (
+    CurrentUserDependency,
+    DbSessionDependency,
+    EmbeddingProviderDependency,
+)
 from app.schemas.entry import (
     EntryCreate,
     EntryDetailResponse,
@@ -14,7 +18,7 @@ from app.schemas.entry import (
     EntrySummaryResponse,
     EntryUpdate,
 )
-from app.services import course_service, entry_service
+from app.services import course_service, entry_service, indexing_service
 
 
 router = APIRouter(prefix="/entries", tags=["entries"])
@@ -29,6 +33,7 @@ def create_entry(
     payload: EntryCreate,
     current_user: CurrentUserDependency,
     session: DbSessionDependency,
+    embedding_provider: EmbeddingProviderDependency,
 ) -> EntryDetailResponse:
     try:
         entry = entry_service.create_entry(
@@ -41,6 +46,13 @@ def create_entry(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Course not found",
         ) from None
+    indexing_result = indexing_service.index_entry(
+        session,
+        owner_id=current_user.id,
+        entry_id=entry.id,
+        provider=embedding_provider,
+    )
+    entry.index_status = indexing_result.index_status.value
     return EntryDetailResponse.model_validate(entry)
 
 
@@ -105,6 +117,7 @@ def update_entry(
     payload: EntryUpdate,
     current_user: CurrentUserDependency,
     session: DbSessionDependency,
+    embedding_provider: EmbeddingProviderDependency,
 ) -> EntryDetailResponse:
     try:
         entry = entry_service.update_entry(
@@ -123,6 +136,14 @@ def update_entry(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Course not found",
         ) from None
+    if "statement" in payload.model_fields_set:
+        indexing_result = indexing_service.index_entry(
+            session,
+            owner_id=current_user.id,
+            entry_id=entry.id,
+            provider=embedding_provider,
+        )
+        entry.index_status = indexing_result.index_status.value
     return EntryDetailResponse.model_validate(entry)
 
 

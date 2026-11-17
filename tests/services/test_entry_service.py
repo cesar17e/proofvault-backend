@@ -92,6 +92,7 @@ def test_create_entry_without_course_uses_authenticated_owner(monkeypatch) -> No
     assert entry.proof == payload.proof
     assert entry.index_status == "pending"
     session.add.assert_called_once_with(entry)
+    session.flush.assert_called_once_with()
     session.commit.assert_called_once_with()
     session.refresh.assert_called_once_with(entry)
 
@@ -426,7 +427,7 @@ def test_course_can_be_cleared_without_lookup(monkeypatch) -> None:
     assert stored_entry.course_id is None
 
 
-def test_failed_update_rolls_back_without_refresh() -> None:
+def test_failed_update_commit_rolls_back_after_refresh() -> None:
     session = make_session()
     stored_entry = make_stored_entry()
     session.scalar.return_value = stored_entry
@@ -441,7 +442,8 @@ def test_failed_update_rolls_back_without_refresh() -> None:
         )
 
     session.rollback.assert_called_once_with()
-    session.refresh.assert_not_called()
+    session.flush.assert_called_once_with()
+    session.refresh.assert_called_once_with(stored_entry)
 
 
 def test_delete_entry_uses_owner_scoped_lookup_and_commits() -> None:
@@ -486,4 +488,6 @@ def test_failed_entry_commit_rolls_back() -> None:
         )
 
     session.rollback.assert_called_once_with()
-    session.refresh.assert_not_called()
+    entry = session.add.call_args.args[0]
+    session.flush.assert_called_once_with()
+    session.refresh.assert_called_once_with(entry)

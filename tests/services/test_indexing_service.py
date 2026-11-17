@@ -94,6 +94,12 @@ def test_successful_indexing_ends_read_transaction_before_provider_call() -> Non
     assert entry.index_status == "ready"
     assert session.commit.call_count == 2
 
+    preparation_statement = session.execute.call_args_list[0].args[0]
+    preparation_sql = str(
+        preparation_statement.compile(dialect=postgresql.dialect())
+    )
+    assert "FOR UPDATE OF entries" in preparation_sql
+
     upsert = session.execute.call_args_list[-1].args[0]
     sql = str(upsert.compile(dialect=postgresql.dialect()))
     params = upsert.compile(dialect=postgresql.dialect()).params
@@ -192,6 +198,52 @@ def test_provider_failure_preserves_entry_and_marks_it_failed() -> None:
     assert entry.index_status == "failed"
     assert session.commit.call_count == 2
     session.rollback.assert_not_called()
+
+
+@pytest.mark.parametrize("provider_fails", [False, True])
+def test_stale_provider_result_cannot_overwrite_newer_statement(
+    provider_fails: bool,
+) -> None:
+    entry = SimpleNamespace(
+        id=ENTRY_ID,
+        owner_id=OWNER_ID,
+        statement=STATEMENT,
+        index_status="pending",
+    )
+    session = make_session(entry)
+
+    def replace_statement_while_provider_runs() -> None:
+        entry.statement = "A newer statement submitted by another request."
+        entry.index_status = "pending"
+
+    error = None
+    if provider_fails:
+        error = EmbeddingProviderError(
+            "old request failed",
+            error_type="Timeout",
+        )
+    provider = StubProvider(
+        error=error,
+        before_call=replace_statement_while_provider_runs,
+    )
+
+    result = indexing_service.index_entry(
+        session,
+        owner_id=OWNER_ID,
+        entry_id=ENTRY_ID,
+        provider=provider,
+    )
+
+    assert result.outcome is indexing_service.IndexingOutcome.STALE
+    assert result.index_status.value == "pending"
+    assert entry.index_status == "pending"
+    assert session.execute.call_count == 1
+    assert session.commit.call_count == 2
+
+    locking_statement = session.scalar.call_args.args[0]
+    assert locking_statement.get_execution_options()["populate_existing"] is True
+    sql = str(locking_statement.compile(dialect=postgresql.dialect()))
+    assert "FOR UPDATE" in sql
 
 
 def test_missing_or_foreign_entry_stops_before_provider_call() -> None:

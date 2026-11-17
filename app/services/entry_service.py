@@ -81,8 +81,7 @@ def create_entry(
         index_status=EntryIndexStatus.PENDING.value,
     )
     session.add(entry)
-    _commit(session)
-    session.refresh(entry)
+    _flush_refresh_commit(session, entry)
     return entry
 
 
@@ -197,12 +196,13 @@ def update_entry(
                 delete(EntryEmbedding).where(EntryEmbedding.entry_id == entry.id)
             )
 
+        session.flush()
+        session.refresh(entry)
         session.commit()
     except Exception:
         session.rollback()
         raise
 
-    session.refresh(entry)
     return entry
 
 
@@ -304,6 +304,16 @@ def _summary_from_row(row: RowMapping) -> EntrySummaryRecord:
 
 def _commit(session: Session) -> None:
     try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+
+
+def _flush_refresh_commit(session: Session, instance: object) -> None:
+    try:
+        session.flush()
+        session.refresh(instance)
         session.commit()
     except Exception:
         session.rollback()

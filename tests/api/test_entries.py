@@ -1,16 +1,22 @@
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 from uuid import UUID
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.api.dependencies import get_current_user, get_db, get_jwt_verifier
+from app.api.dependencies import (
+    get_current_user,
+    get_db,
+    get_embedding_provider,
+    get_jwt_verifier,
+)
 from app.api.router import api_router
 from app.auth import CurrentUser
-from app.schemas.entry import EntryKind
-from app.services import course_service, entry_service
+from app.schemas.entry import EntryIndexStatus, EntryKind
+from app.services import course_service, entry_service, indexing_service
 
 
 USER_ID = UUID("123e4567-e89b-12d3-a456-426614174000")
@@ -21,6 +27,7 @@ SESSION_ID = UUID("523e4567-e89b-12d3-a456-426614174000")
 NOW = datetime(2026, 11, 15, tzinfo=UTC)
 STATEMENT = "  Suppose $a_n \\to L$.\n\nThen $(a_n)$ is bounded.  "
 PROOF = "Choose $N$ such that $|a_n-L|<1$ whenever $n\\ge N$."
+EMBEDDING_PROVIDER = object()
 
 
 def make_user() -> CurrentUser:
@@ -60,6 +67,9 @@ def make_client(*, authenticated: bool = True) -> TestClient:
     application.include_router(api_router)
     application.dependency_overrides[get_db] = lambda: object()
     application.dependency_overrides[get_jwt_verifier] = lambda: object()
+    application.dependency_overrides[get_embedding_provider] = (
+        lambda: EMBEDDING_PROVIDER
+    )
     if authenticated:
         application.dependency_overrides[get_current_user] = make_user
     return TestClient(application)
@@ -77,6 +87,24 @@ def valid_payload() -> dict:
     }
 
 
+def make_indexing_result(
+    *,
+    status: EntryIndexStatus = EntryIndexStatus.READY,
+    outcome: indexing_service.IndexingOutcome = (
+        indexing_service.IndexingOutcome.INDEXED
+    ),
+) -> indexing_service.IndexingResult:
+    return indexing_service.IndexingResult(
+        entry_id=ENTRY_ID,
+        outcome=outcome,
+        index_status=status,
+        content_hash="a" * 64,
+        provider="voyage",
+        model="voyage-4",
+        duration_ms=1.0,
+    )
+
+
 def test_create_entry_preserves_source_and_uses_authenticated_owner(
     monkeypatch,
 ) -> None:
@@ -86,7 +114,16 @@ def test_create_entry_preserves_source_and_uses_authenticated_owner(
         captured.update(owner_id=owner_id, payload=payload)
         return make_entry(statement=payload.statement, proof=payload.proof)
 
+    def fake_index(session, *, owner_id, entry_id, provider):
+        captured.update(
+            index_owner_id=owner_id,
+            index_entry_id=entry_id,
+            provider=provider,
+        )
+        return make_indexing_result()
+
     monkeypatch.setattr(entry_service, "create_entry", fake_create)
+    monkeypatch.setattr(indexing_service, "index_entry", fake_index)
     client = make_client()
 
     response = client.post("/api/v1/entries", json=valid_payload())
@@ -95,10 +132,13 @@ def test_create_entry_preserves_source_and_uses_authenticated_owner(
     assert response.json()["id"] == str(ENTRY_ID)
     assert response.json()["statement"] == STATEMENT
     assert response.json()["proof"] == PROOF
-    assert response.json()["index_status"] == "pending"
+    assert response.json()["index_status"] == "ready"
     assert "owner_id" not in response.json()
     assert captured["owner_id"] == USER_ID
     assert captured["payload"].statement == STATEMENT
+    assert captured["index_owner_id"] == USER_ID
+    assert captured["index_entry_id"] == ENTRY_ID
+    assert captured["provider"] is EMBEDDING_PROVIDER
 
 
 def test_create_entry_allows_no_course_and_no_proof(monkeypatch) -> None:
@@ -108,6 +148,14 @@ def test_create_entry_allows_no_course_and_no_proof(monkeypatch) -> None:
         return make_entry(course_id=None, proof=None)
 
     monkeypatch.setattr(entry_service, "create_entry", fake_create)
+    monkeypatch.setattr(
+        indexing_service,
+        "index_entry",
+        lambda *args, **kwargs: make_indexing_result(
+            status=EntryIndexStatus.FAILED,
+            outcome=indexing_service.IndexingOutcome.FAILED,
+        ),
+    )
     client = make_client()
 
     response = client.post(
@@ -122,6 +170,7 @@ def test_create_entry_allows_no_course_and_no_proof(monkeypatch) -> None:
     assert response.status_code == 201
     assert response.json()["course_id"] is None
     assert response.json()["proof"] is None
+    assert response.json()["index_status"] == "failed"
 
 
 def test_list_entries_returns_summaries_and_forwards_filters(monkeypatch) -> None:
@@ -314,6 +363,8 @@ def test_update_entry_forwards_partial_changes_and_preserves_source(
         return make_entry(proof=payload.proof)
 
     monkeypatch.setattr(entry_service, "update_entry", fake_update)
+    index_entry = MagicMock()
+    monkeypatch.setattr(indexing_service, "index_entry", index_entry)
     client = make_client()
 
     response = client.patch(
@@ -327,6 +378,43 @@ def test_update_entry_forwards_partial_changes_and_preserves_source(
         "owner_id": USER_ID,
         "entry_id": ENTRY_ID,
         "changes": {"proof": revised_proof},
+    }
+    index_entry.assert_not_called()
+
+
+def test_statement_update_is_reindexed_for_authenticated_owner(
+    monkeypatch,
+) -> None:
+    revised_statement = "Every convergent sequence is bounded."
+    captured = {}
+
+    def fake_update(session, *, owner_id, entry_id, payload):
+        return make_entry(statement=payload.statement)
+
+    def fake_index(session, *, owner_id, entry_id, provider):
+        captured.update(
+            owner_id=owner_id,
+            entry_id=entry_id,
+            provider=provider,
+        )
+        return make_indexing_result()
+
+    monkeypatch.setattr(entry_service, "update_entry", fake_update)
+    monkeypatch.setattr(indexing_service, "index_entry", fake_index)
+    client = make_client()
+
+    response = client.patch(
+        f"/api/v1/entries/{ENTRY_ID}",
+        json={"statement": revised_statement},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["statement"] == revised_statement
+    assert response.json()["index_status"] == "ready"
+    assert captured == {
+        "owner_id": USER_ID,
+        "entry_id": ENTRY_ID,
+        "provider": EMBEDDING_PROVIDER,
     }
 
 
