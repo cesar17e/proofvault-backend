@@ -3,7 +3,9 @@
 import hashlib
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import StrEnum
 from uuid import UUID
 
@@ -73,6 +75,7 @@ def index_entry(
     owner_id: UUID,
     entry_id: UUID,
     provider: EmbeddingProvider,
+    before_provider_call: Callable[[], None] | None = None,
 ) -> IndexingResult:
     """Ensure one entry has a current statement embedding."""
     _validate_provider(provider)
@@ -108,6 +111,9 @@ def index_entry(
         return result
 
     entry.index_status = EntryIndexStatus.PENDING.value
+    # This timestamp is also the V1 signal that a pending entry may still be
+    # actively indexing. It lets repair tooling avoid recently started work.
+    entry.updated_at = datetime.now(UTC)
     if existing_embedding is not None:
         session.execute(
             delete(EntryEmbedding).where(
@@ -119,6 +125,8 @@ def index_entry(
 
     started_at = time.perf_counter()
     try:
+        if before_provider_call is not None:
+            before_provider_call()
         batch = provider.embed_documents([statement_source])
         vector = _single_embedding(batch)
     except EmbeddingProviderError as error:

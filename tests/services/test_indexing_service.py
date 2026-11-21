@@ -79,12 +79,16 @@ def test_successful_indexing_ends_read_transaction_before_provider_call() -> Non
     provider = StubProvider(
         before_call=lambda: session.commit.assert_called_once_with()
     )
+    before_provider_call = MagicMock(
+        side_effect=lambda: session.commit.assert_called_once_with()
+    )
 
     result = indexing_service.index_entry(
         session,
         owner_id=OWNER_ID,
         entry_id=ENTRY_ID,
         provider=provider,
+        before_provider_call=before_provider_call,
     )
 
     assert provider.documents == [[STATEMENT]]
@@ -93,6 +97,7 @@ def test_successful_indexing_ends_read_transaction_before_provider_call() -> Non
     assert result.total_tokens == 17
     assert entry.index_status == "ready"
     assert session.commit.call_count == 2
+    before_provider_call.assert_called_once_with()
 
     preparation_statement = session.execute.call_args_list[0].args[0]
     preparation_sql = str(
@@ -127,17 +132,20 @@ def test_matching_embedding_is_skipped_and_repairs_status() -> None:
     )
     session = make_session(entry, embedding)
     provider = StubProvider()
+    before_provider_call = MagicMock()
 
     result = indexing_service.index_entry(
         session,
         owner_id=OWNER_ID,
         entry_id=ENTRY_ID,
         provider=provider,
+        before_provider_call=before_provider_call,
     )
 
     assert result.outcome is indexing_service.IndexingOutcome.SKIPPED
     assert entry.index_status == "ready"
     assert provider.documents == []
+    before_provider_call.assert_not_called()
     session.commit.assert_called_once_with()
 
 
